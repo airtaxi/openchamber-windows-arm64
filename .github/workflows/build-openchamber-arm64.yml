@@ -89,19 +89,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Bun
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $bunUrl = "https://github.com/oven-sh/bun/releases/latest/download/bun-windows-aarch64.zip"
-          $bunZip = Join-Path $env:RUNNER_TEMP "bun.zip"
-          $bunDir = Join-Path $env:RUNNER_TEMP "bun"
-          Invoke-WebRequest -UseBasicParsing -Uri $bunUrl -OutFile $bunZip
-          Expand-Archive -Path $bunZip -DestinationPath $bunDir -Force
-          $bunExe = Get-ChildItem -Path $bunDir -Recurse -Filter "bun.exe" | Select-Object -First 1
-          $bunFolder = Split-Path $bunExe.FullName
-          Add-Content -LiteralPath $env:GITHUB_PATH -Value $bunFolder
-          & $bunExe.FullName --version
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
       - name: Install NSIS
         shell: pwsh
@@ -115,12 +105,94 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_PATH -Value $nsisFolder
           & (Join-Path $nsisFolder "makensis.exe") /VERSION
 
-      - name: Build ARM64 Installer
+      - name: Clone OpenChamber
         shell: pwsh
         env:
           UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
         run: |
-          .\build.ps1 -NonInteractive -Tag $env:UPSTREAM_TAG -OutputDir dist
+          $ErrorActionPreference = "Stop"
+          git clone --branch $env:UPSTREAM_TAG --depth 1 https://github.com/openchamber/openchamber.git openchamber
+
+      - name: Install Dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Push-Location openchamber
+          bun install --frozen-lockfile
+          Pop-Location
+
+      - name: Apply ARM64 Patches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $clonePath = "openchamber"
+
+          # Patch 1: prepare-opencode-cli.mjs -- force x64-baseline on win32/arm64
+          $prepareCliPath = Join-Path $clonePath "packages/electron/scripts/prepare-opencode-cli.mjs"
+          $c = Get-Content $prepareCliPath -Raw
+          $old = "if (arch === 'arm64') return { name: 'opencode-windows-arm64.zip', binary: 'opencode.exe' };"
+          $new = "if (arch === 'arm64') return { name: 'opencode-windows-x64-baseline.zip', binary: 'opencode.exe' };"
+          if ($c.Contains($old)) {
+            $c = $c.Replace($old, $new)
+            Set-Content $prepareCliPath $c -NoNewline
+            Write-Host "[OK] Patched prepare-opencode-cli.mjs (arm64 -> x64-baseline)"
+          }
+
+          # Patch 2: node-pty binding.gyp -- disable Spectre mitigation
+          $nodePtyDir = Get-ChildItem -Path (Join-Path $clonePath "node_modules/.bun") -Directory -Filter "node-pty@*" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($nodePtyDir) {
+            $bg = Join-Path $nodePtyDir.FullName "node_modules/node-pty/binding.gyp"
+            if (Test-Path $bg) {
+              $c = Get-Content $bg -Raw
+              $old = "'SpectreMitigation': 'Spectre'"
+              $new = "'SpectreMitigation': 'false'"
+              if ($c.Contains($old)) {
+                $c = $c.Replace($old, $new)
+                Set-Content $bg $c -NoNewline
+                Write-Host "[OK] Patched node-pty/binding.gyp (Spectre mitigation disabled)"
+              }
+            }
+          }
+
+      - name: Build Web Assets
+        working-directory: openchamber/packages/electron
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          bun run build:web-assets
+
+      - name: Bundle Main Process
+        working-directory: openchamber/packages/electron
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          bun run bundle:main
+
+      - name: Rebuild Native Modules
+        working-directory: openchamber/packages/electron
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:ELECTRON_BUILDER_ARCH = "arm64"
+          node ./scripts/rebuild-native.mjs
+
+      - name: Build ARM64 Installer
+        working-directory: openchamber/packages/electron
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          node ./scripts/package.mjs --win --arm64 --publish=never
+
+      - name: Collect Output
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          $exe = Get-ChildItem -Path openchamber/packages/electron/dist -Filter "OpenChamber-*-win-arm64.exe" | Select-Object -First 1
+          if (-not $exe) { throw "Installer .exe not found" }
+          Copy-Item $exe.FullName -Destination (Join-Path "dist" $exe.Name) -Force
+          Write-Host "Installer: $($exe.Name)"
+          Write-Host "Size: $([math]::Round($exe.Length / 1MB, 1)) MB"
 
       - name: Archive Dist
         shell: pwsh
