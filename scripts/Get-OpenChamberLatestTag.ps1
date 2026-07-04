@@ -16,14 +16,18 @@ Defaults to $env:GITHUB_REPOSITORY.
 Git remote URL for the OpenChamber source. Defaults to the public HTTPS URL.
 
 .PARAMETER TagOverride
-Force a specific tag (e.g. "v1.13.9"). Skips upstream lookup.
+Force a specific upstream tag to clone (e.g. "v1.13.9"). Skips upstream lookup.
+
+.PARAMETER ReleaseTagOverride
+Force a specific release tag to publish (e.g. "v1.13.9.1"). Defaults to the upstream tag.
 #>
 
 [CmdletBinding()]
 param(
     [string]$Repo = $env:GITHUB_REPOSITORY,
     [string]$UpstreamUrl = "https://github.com/openchamber/openchamber.git",
-    [string]$TagOverride = ""
+    [string]$TagOverride = "",
+    [string]$ReleaseTagOverride = ""
 )
 
 Set-StrictMode -Version Latest
@@ -67,6 +71,16 @@ if ([string]::IsNullOrWhiteSpace($TagOverride)) {
 
 Write-Host "Upstream tag:      $upstreamTag"
 
+# -- Resolve release tag -----------------------------------------------
+if ([string]::IsNullOrWhiteSpace($ReleaseTagOverride)) {
+    $releaseTag = $upstreamTag
+} else {
+    Write-Host "Using release tag override: $ReleaseTagOverride"
+    $releaseTag = $ReleaseTagOverride.Trim()
+}
+
+Write-Host "Release tag:       $releaseTag"
+
 # -- Resolve latest release in this repo -------------------------------
 $latestReleaseTag = Get-LatestReleaseTag -RepoName $Repo
 Write-Host "Latest release:    $(if ($latestReleaseTag) { $latestReleaseTag } else { '(none)' })"
@@ -76,26 +90,28 @@ $shouldBuild = $false
 if ([string]::IsNullOrWhiteSpace($latestReleaseTag)) {
     $shouldBuild = $true
     Write-Host "No existing release found. Build needed."
-} elseif (([version]($upstreamTag -replace '^v','')) -gt ([version]($latestReleaseTag -replace '^v',''))) {
+} elseif (([version]($releaseTag -replace '^v','')) -gt ([version]($latestReleaseTag -replace '^v',''))) {
     $shouldBuild = $true
-    Write-Host "Upstream tag is newer than latest release. Build needed."
+    Write-Host "Release tag is newer than latest release. Build needed."
 } else {
     Write-Host "Latest release is up to date. No build needed."
 }
 
 # -- Emit outputs ------------------------------------------------------
-$version = $upstreamTag -replace '^v',''
+$version = $releaseTag -replace '^v',''
 
 Write-Host ""
 Write-Host "Summary:"
 Write-Host "  upstream_tag:      $upstreamTag"
+Write-Host "  release_tag:       $releaseTag"
 Write-Host "  version:           $version"
 Write-Host "  latest_release:    $latestReleaseTag"
 Write-Host "  should_build:      $shouldBuild"
 
 if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_OUTPUT)) {
-    "upstream_tag=$upstreamTag"       >> $env:GITHUB_OUTPUT
-    "version=$version"                >> $env:GITHUB_OUTPUT
+    "upstream_tag=$upstreamTag"        >> $env:GITHUB_OUTPUT
+    "release_tag=$releaseTag"          >> $env:GITHUB_OUTPUT
+    "version=$version"                 >> $env:GITHUB_OUTPUT
     "latest_release=$latestReleaseTag" >> $env:GITHUB_OUTPUT
     "should_build=$shouldBuild".ToLower() >> $env:GITHUB_OUTPUT
 }

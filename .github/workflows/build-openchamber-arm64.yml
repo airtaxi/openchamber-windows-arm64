@@ -9,7 +9,12 @@ on:
         type: boolean
         default: false
       tag_override:
-        description: Optional specific tag to build (e.g. v1.13.9)
+        description: Optional specific upstream tag to build (e.g. v1.13.9)
+        required: false
+        type: string
+        default: ""
+      release_tag_override:
+        description: Optional release tag to publish (e.g. v1.13.9.1). Defaults to the upstream tag.
         required: false
         type: string
         default: ""
@@ -78,13 +83,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_OVERRIDE: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_override || '' }}
+          RELEASE_TAG_OVERRIDE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag_override || '' }}
         run: |
-          .\scripts\Get-OpenChamberLatestTag.ps1 -Repo $env:GITHUB_REPOSITORY -TagOverride $env:TAG_OVERRIDE
+          .\scripts\Get-OpenChamberLatestTag.ps1 -Repo $env:GITHUB_REPOSITORY -TagOverride $env:TAG_OVERRIDE -ReleaseTagOverride $env:RELEASE_TAG_OVERRIDE
 
   build:
     name: Build And Release
     needs: check
-    if: needs.check.outputs.should_build == 'true' || (github.event_name == 'workflow_dispatch' && (inputs.force_build || inputs.tag_override != ''))
+    if: needs.check.outputs.should_build == 'true' || (github.event_name == 'workflow_dispatch' && (inputs.force_build || inputs.tag_override != '' || inputs.release_tag_override != ''))
     runs-on: windows-11-arm
     steps:
       - uses: actions/checkout@v6
@@ -256,7 +262,7 @@ jobs:
       - name: Generate Scoop Manifest
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ needs.check.outputs.upstream_tag }}
+          RELEASE_TAG: ${{ needs.check.outputs.release_tag }}
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath .\dist.7z).Hash.ToLowerInvariant()
@@ -291,7 +297,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: openchamber-arm64-${{ needs.check.outputs.upstream_tag }}
+          name: openchamber-arm64-${{ needs.check.outputs.release_tag }}
           path: |
             dist.7z
             openchamber-arm64.json
@@ -300,13 +306,14 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.check.outputs.upstream_tag }}
+          RELEASE_TAG: ${{ needs.check.outputs.release_tag }}
+          UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           $notes = @"
           Unofficial Windows ARM64 build of OpenChamber $env:VERSION.
 
-          Source: openchamber/openchamber $env:RELEASE_TAG
+          Source: openchamber/openchamber $env:UPSTREAM_TAG
           Built on GitHub Actions (windows-11-arm runner).
           "@
 
@@ -320,7 +327,7 @@ jobs:
       - name: Commit Scoop Manifest
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ needs.check.outputs.upstream_tag }}
+          RELEASE_TAG: ${{ needs.check.outputs.release_tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
