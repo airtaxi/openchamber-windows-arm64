@@ -154,6 +154,58 @@ jobs:
             }
           }
 
+          # Patch 3: Disable OpenCode upgrade API -- return no-op for upgrade and upgrade-status
+          $routesPath = Join-Path $clonePath "packages/web/server/lib/opencode/routes.js"
+          if (Test-Path $routesPath) {
+            $c = Get-Content $routesPath -Raw
+            $oldUpgrade = "app.post('/api/opencode/upgrade', async (req, res) => {"
+            $newUpgrade = "app.post('/api/opencode/upgrade', async (req, res) => { return res.status(409).json({ success: false, error: 'OpenCode upgrade is disabled in this build.' });"
+            $oldStatus = "app.get('/api/opencode/upgrade-status', async (_req, res) => {"
+            $newStatus = "app.get('/api/opencode/upgrade-status', async (_req, res) => { return res.json({ available: false, currentVersion: null, latestVersion: null, source: 'bundled' });"
+            $changed = $false
+            if ($c.Contains($oldUpgrade) -and -not $c.Contains($newUpgrade)) {
+              $c = $c.Replace($oldUpgrade, $newUpgrade); $changed = $true
+            }
+            if ($c.Contains($oldStatus) -and -not $c.Contains($newStatus)) {
+              $c = $c.Replace($oldStatus, $newStatus); $changed = $true
+            }
+            if ($changed) {
+              Set-Content $routesPath $c -NoNewline
+              Write-Host "[OK] Patched routes.js (upgrade API disabled)"
+            }
+          }
+
+          # Patch 4: Default showOpenCodeUpdateNotifications to false
+          $storePath = Join-Path $clonePath "packages/ui/src/stores/useUIStore.ts"
+          if (Test-Path $storePath) {
+            $c = Get-Content $storePath -Raw
+            $old = "showOpenCodeUpdateNotifications: true,"
+            $new = "showOpenCodeUpdateNotifications: false,"
+            if ($c.Contains($old)) {
+              $c = $c.Replace($old, $new)
+              Set-Content $storePath $c -NoNewline
+              Write-Host "[OK] Patched useUIStore.ts (update notifications default off)"
+            }
+          }
+
+          # Patch 5: Hide update notification checkbox from OpenCode CLI settings
+          $settingsPath = Join-Path $clonePath "packages/ui/src/components/sections/openchamber/OpenCodeCliSettings.tsx"
+          if (Test-Path $settingsPath) {
+            $c = Get-Content $settingsPath -Raw
+            $oldCheckboxStart = '        <label data-settings-item="sessions.opencode-update-notifications"'
+            $oldCheckboxEnd = '        </label>'
+            $startIdx = $c.IndexOf($oldCheckboxStart)
+            if ($startIdx -ge 0) {
+              $endIdx = $c.IndexOf($oldCheckboxEnd, $startIdx)
+              if ($endIdx -ge 0) {
+                $endIdx += $oldCheckboxEnd.Length
+                $c = $c.Substring(0, $startIdx) + $c.Substring($endIdx)
+                Set-Content $settingsPath $c -NoNewline
+                Write-Host "[OK] Patched OpenCodeCliSettings.tsx (hidden update notification checkbox)"
+              }
+            }
+          }
+
       - name: Build Web Assets
         working-directory: openchamber/packages/electron
         shell: pwsh
