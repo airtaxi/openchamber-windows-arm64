@@ -32,6 +32,7 @@ jobs:
     outputs:
       should_build: ${{ steps.resolve.outputs.should_build }}
       upstream_tag: ${{ steps.resolve.outputs.upstream_tag }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
       version: ${{ steps.resolve.outputs.version }}
     steps:
       - id: previous_run

@@ -50,7 +50,13 @@ function Get-LatestTag {
 
 function Get-LatestReleaseTag {
     param([string]$RepoName)
-    $releases = gh release list --repo $RepoName --limit 30 --json tagName 2>$null | ConvertFrom-Json
+    $rawJson = gh release list --repo $RepoName --limit 30 --json tagName 2>&1
+    Write-Host "[DEBUG] gh release list raw output: $rawJson"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[DEBUG] gh release list exited with code $LASTEXITCODE"
+        return $null
+    }
+    $releases = $rawJson | ConvertFrom-Json
     if (-not $releases -or $releases.Count -eq 0) { return $null }
     $validTags = @($releases.tagName | Where-Object { $_ -match '^v\d+\.\d+\.\d+(\.\d+)?$' })
     if ($validTags.Count -eq 0) { return $null }
