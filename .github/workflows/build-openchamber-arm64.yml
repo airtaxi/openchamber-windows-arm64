@@ -109,16 +109,14 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $nsisUrl = "https://sourceforge.net/projects/nsis/files/NSIS%203/3.12/nsis-3.12.zip/download"
-          $nsisZip = Join-Path $env:RUNNER_TEMP "nsis.zip"
-          $nsisDir = Join-Path $env:RUNNER_TEMP "nsis"
-          Invoke-WebRequest -UseBasicParsing -Uri $nsisUrl -OutFile $nsisZip
-          Expand-Archive -Path $nsisZip -DestinationPath $nsisDir -Force
-          $nsisExe = Get-ChildItem -Path $nsisDir -Recurse -Filter "makensis.exe" | Select-Object -First 1
-          $nsisFolder = Split-Path $nsisExe.FullName
+          choco install nsis --version 3.12 --yes --no-progress
+          $nsisFolder = "C:\Program Files (x86)\NSIS"
+          if (-not (Test-Path (Join-Path $nsisFolder "makensis.exe"))) {
+            $nsisFolder = "C:\Program Files\NSIS"
+          }
           $env:GITHUB_PATH = "$nsisFolder;$env:GITHUB_PATH"
           $env:PATH = "$nsisFolder;$env:PATH"
-          & $nsisExe.FullName --VERSION
+          & (Join-Path $nsisFolder "makensis.exe") --VERSION
 
       - name: Build ARM64 Installer
         shell: pwsh
