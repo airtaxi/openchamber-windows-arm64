@@ -70,4 +70,4 @@ OpenChamber Windows ARM64 is licensed under the [MIT License](LICENSE).
 
 ## Author
 
-Built with help from OpenAI Codex.
+Created by [Howon Lee (airtaxi)](https://github.com/airtaxi).

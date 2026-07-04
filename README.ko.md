@@ -72,4 +72,4 @@ OpenChamber Windows ARM64는 [MIT 라이선스](LICENSE)로 배포됩니다.
 
 ## 제작자
 
-OpenAI Codex의 도움을 받아 제작되었습니다.
+[이호원 (airtaxi)](https://github.com/airtaxi)이 만들었습니다.
