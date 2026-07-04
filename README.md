@@ -45,6 +45,9 @@ The build applies the following patches to the cloned source after `bun install`
 
 - **prepare-opencode-cli.mjs** — Forces the x64-baseline OpenCode CLI binary instead of the non-functional ARM64 binary (runs via x64 emulation on Windows ARM).
 - **node-pty binding.gyp** — Disables Spectre mitigation (`Spectre` → `false`) since ARM64 Spectre libraries are not available in the CI toolchain.
+- **opencode/routes.js** — Disables the `/api/opencode/upgrade` and `/api/opencode/upgrade-status` endpoints to prevent OpenCode from self-upgrading to a broken ARM64 binary.
+- **useUIStore.ts** — Defaults `showOpenCodeUpdateNotifications` to `false` so update toasts do not appear.
+- **OpenCodeCliSettings.tsx** — Hides the update notification checkbox from the settings page.
 
 
 ## Requirements (for local builds)
