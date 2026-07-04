@@ -100,9 +100,7 @@ jobs:
           Expand-Archive -Path $bunZip -DestinationPath $bunDir -Force
           $bunExe = Get-ChildItem -Path $bunDir -Recurse -Filter "bun.exe" | Select-Object -First 1
           $bunFolder = Split-Path $bunExe.FullName
-          $oldPath = $env:PATH
-          $env:GITHUB_PATH = "$bunFolder;$env:GITHUB_PATH"
-          $env:PATH = "$bunFolder;$oldPath"
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $bunFolder
           & $bunExe.FullName --version
 
       - name: Install NSIS
@@ -114,8 +112,7 @@ jobs:
           if (-not (Test-Path (Join-Path $nsisFolder "makensis.exe"))) {
             $nsisFolder = "C:\Program Files\NSIS"
           }
-          $env:GITHUB_PATH = "$nsisFolder;$env:GITHUB_PATH"
-          $env:PATH = "$nsisFolder;$env:PATH"
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $nsisFolder
           & (Join-Path $nsisFolder "makensis.exe") /VERSION
 
       - name: Build ARM64 Installer
