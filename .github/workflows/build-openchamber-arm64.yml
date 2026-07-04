@@ -116,7 +116,7 @@ jobs:
           }
           $env:GITHUB_PATH = "$nsisFolder;$env:GITHUB_PATH"
           $env:PATH = "$nsisFolder;$env:PATH"
-          & (Join-Path $nsisFolder "makensis.exe") --VERSION
+          & (Join-Path $nsisFolder "makensis.exe") /VERSION
 
       - name: Build ARM64 Installer
         shell: pwsh
