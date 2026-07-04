@@ -123,12 +123,7 @@ jobs:
         env:
           UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
         run: |
-          $buildArgs = @(
-            '-NonInteractive',
-            '-Tag', $env:UPSTREAM_TAG,
-            '-OutputDir', 'dist'
-          )
-          .\build.ps1 @buildArgs
+          .\build.ps1 -NonInteractive -Tag $env:UPSTREAM_TAG -OutputDir dist
 
       - name: Archive Dist
         shell: pwsh
