@@ -7,7 +7,7 @@
 
 OpenChamber Windows ARM64는 데스크톱 AI 코딩 에이전트인 [OpenChamber](https://github.com/openchamber/openchamber)의 Windows ARM64 NSIS 인스톨러를 자동으로 생성하는 비공식 빌드 파이프라인입니다. GitHub Actions에서 실행되며, 업스트림 저장소의 새 릴리즈를 6시간마다 폴링하고, 네이티브 Windows ARM 러너에서 ARM64 인스톨러를 빌드한 뒤 GitHub Release를 게시하고 Scoop bucket 매니페스트를 갱신하여 자동 업데이트를 지원합니다.
 
-이 프로젝트는 OpenChamber가 공식 Windows ARM64 빌드를 제공할 때까지 유지될 예정입니다. 공식 ARM64 릴리즈가 배포되면 워크플로우 실행을 중단하고 이 저장소를 archive 처리합니다.
+이 프로젝트는 OpenChamber가 공식 Windows ARM64 빌드를 제공할 때까지 유지될 예정입니다. 공식 ARM64 릴리즈가 배포되면 워크플로우 실행을 중단하고 이 저장소를 archive 처리할 예정입니다.
 
 ## Disclaimer
 
