@@ -46,12 +46,6 @@ The build applies the following patches to the cloned source after `bun install`
 - **prepare-opencode-cli.mjs** — Forces the x64-baseline OpenCode CLI binary instead of the non-functional ARM64 binary (runs via x64 emulation on Windows ARM).
 - **node-pty binding.gyp** — Disables Spectre mitigation (`Spectre` → `false`) since ARM64 Spectre libraries are not available in the CI toolchain.
 
-## Manual Trigger
-
-The workflow supports manual dispatch via GitHub Actions:
-
-- **force_build** — Build even when the upstream tag is not newer than the latest release.
-- **tag_override** — Build a specific tag (e.g. `v1.13.9`).
 
 ## Requirements (for local builds)
 
@@ -75,7 +69,5 @@ A successful build produces:
 OpenChamber Windows ARM64 is licensed under the [MIT License](LICENSE).
 
 ## Author
-
-Created by [Howon Lee (airtaxi)](https://github.com/airtaxi).
 
 Built with help from OpenAI Codex.

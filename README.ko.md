@@ -47,12 +47,7 @@ scoop update openchamber-arm64
 - **prepare-opencode-cli.mjs** — 작동하지 않는 ARM64 바이너리 대신 x64-baseline OpenCode CLI 바이너리를 강제 사용합니다 (Windows ARM에서 x64 에뮬레이션으로 실행).
 - **node-pty binding.gyp** — CI 툴체인에 ARM64 Spectre 라이브러리가 없으므로 Spectre mitigation을 비활성화합니다 (`Spectre` → `false`).
 
-## 수동 트리거
 
-워크플로우는 GitHub Actions에서 수동 실행을 지원합니다:
-
-- **force_build** — 업스트림 태그가 최신 릴리즈보다 새것이 아니어도 강제로 빌드합니다.
-- **tag_override** — 특정 태그를 지정하여 빌드합니다 (예: `v1.13.9`).
 
 ## 요구사항 (로컬 빌드 시)
 
@@ -76,7 +71,5 @@ scoop update openchamber-arm64
 OpenChamber Windows ARM64는 [MIT 라이선스](LICENSE)로 배포됩니다.
 
 ## 제작자
-
-[이호원 (airtaxi)](https://github.com/airtaxi)이 만들었습니다.
 
 OpenAI Codex의 도움을 받아 제작되었습니다.
