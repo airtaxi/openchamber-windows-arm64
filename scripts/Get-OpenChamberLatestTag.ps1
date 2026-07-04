@@ -50,20 +50,16 @@ function Get-LatestTag {
 
 function Get-LatestReleaseTag {
     param([string]$RepoName)
-    $rawJson = gh release list --repo $RepoName --limit 30 --json tagName 2>&1
-    Write-Host "[DEBUG] gh release list raw output: $rawJson"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[DEBUG] gh release list exited with code $LASTEXITCODE"
-        return $null
+    try {
+        $tag = gh release view --repo $RepoName --json tagName --jq ".tagName" 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($tag)) {
+            $tag = $tag.Trim()
+            if ($tag -match '^v\d+\.\d+\.\d+(\.\d+)?$') { return $tag }
+        }
+    } catch {
+        Write-Host "[DEBUG] gh release view failed: $_"
     }
-    $releases = $rawJson | ConvertFrom-Json
-    if (-not $releases -or $releases.Count -eq 0) { return $null }
-    $validTags = @($releases.tagName | Where-Object { $_ -match '^v\d+\.\d+\.\d+(\.\d+)?$' })
-    if ($validTags.Count -eq 0) { return $null }
-    $latest = ($validTags |
-        Sort-Object { try { [version]($_ -replace '^v','') } catch { [version]'0.0.0' } } -Descending)[0]
-    if ($latest -notmatch '^v\d+\.\d+\.\d+(\.\d+)?$') { return $null }
-    return $latest
+    return $null
 }
 
 # -- Resolve upstream tag ----------------------------------------------
