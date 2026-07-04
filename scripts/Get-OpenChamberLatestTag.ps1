@@ -35,10 +35,10 @@ function Get-LatestTag {
     if ($LASTEXITCODE -ne 0 -or -not $tags) {
         throw "Failed to fetch tags from $Remote"
     }
-    $tagLines = $tags | Where-Object { $_ -match 'refs/tags/v\d+\.\d+\.\d+$' }
-    $validTags = $tagLines | ForEach-Object { ($_ -split '\s+')[1] -replace 'refs/tags/','' } |
-        Where-Object { $_ -match '^v\d+\.\d+\.\d+$' }
-    if (-not $validTags -or $validTags.Count -eq 0) { throw "No version tags found in $Remote" }
+    $tagLines = $tags | Where-Object { $_ -match 'refs/tags/v\d+\.\d+\.\d+(\.\d+)?$' }
+    $validTags = @($tagLines | ForEach-Object { ($_ -split '\s+')[1] -replace 'refs/tags/','' } |
+        Where-Object { $_ -match '^v\d+\.\d+\.\d+(\.\d+)?$' })
+    if ($validTags.Count -eq 0) { throw "No version tags found in $Remote" }
     $latest = ($validTags |
         Sort-Object { try { [version]($_ -replace '^v','') } catch { [version]'0.0.0' } } -Descending)[0]
     return $latest
@@ -48,11 +48,11 @@ function Get-LatestReleaseTag {
     param([string]$RepoName)
     $releases = gh release list --repo $RepoName --limit 30 --json tagName 2>$null | ConvertFrom-Json
     if (-not $releases -or $releases.Count -eq 0) { return $null }
-    $validTags = $releases.tagName | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' }
-    if (-not $validTags -or $validTags.Count -eq 0) { return $null }
+    $validTags = @($releases.tagName | Where-Object { $_ -match '^v\d+\.\d+\.\d+(\.\d+)?$' })
+    if ($validTags.Count -eq 0) { return $null }
     $latest = ($validTags |
         Sort-Object { try { [version]($_ -replace '^v','') } catch { [version]'0.0.0' } } -Descending)[0]
-    if ($latest -notmatch '^v\d+\.\d+\.\d+$') { return $null }
+    if ($latest -notmatch '^v\d+\.\d+\.\d+(\.\d+)?$') { return $null }
     return $latest
 }
 
