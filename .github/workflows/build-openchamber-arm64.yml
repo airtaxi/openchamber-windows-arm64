@@ -1,0 +1,215 @@
+name: Build OpenChamber ARM64
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: Build even when the upstream tag is not newer than the latest release
+        required: false
+        type: boolean
+        default: false
+      tag_override:
+        description: Optional specific tag to build (e.g. v1.13.9)
+        required: false
+        type: string
+        default: ""
+  schedule:
+    - cron: "0 */6 * * *"
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  check:
+    name: Check Upstream Tag
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.resolve.outputs.should_build }}
+      upstream_tag: ${{ steps.resolve.outputs.upstream_tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - id: previous_run
+        name: Stop Scheduled Runs After Failure
+        if: github.event_name == 'schedule'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $runs = gh run list `
+            --repo $env:GITHUB_REPOSITORY `
+            --workflow $env:GITHUB_WORKFLOW `
+            --status completed `
+            --limit 100 `
+            --json conclusion,databaseId,url `
+            | ConvertFrom-Json
+
+          foreach ($run in $runs) {
+            $jobs = gh run view $run.databaseId `
+              --repo $env:GITHUB_REPOSITORY `
+              --json jobs `
+              | ConvertFrom-Json
+
+            $buildJob = $jobs.jobs | Where-Object { $_.name -eq "Build And Release" } | Select-Object -First 1
+            if (-not $buildJob -or $buildJob.conclusion -eq "skipped") {
+              continue
+            }
+
+            if ($buildJob.conclusion -eq "failure") {
+              "continue=false" >> $env:GITHUB_OUTPUT
+              "Latest completed build job failed: $($run.url)" >> $env:GITHUB_STEP_SUMMARY
+              exit 0
+            }
+
+            break
+          }
+
+          "continue=true" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/checkout@v6
+        if: steps.previous_run.outputs.continue != 'false'
+
+      - id: resolve
+        name: Resolve Latest Tag
+        if: steps.previous_run.outputs.continue != 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_OVERRIDE: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_override || '' }}
+        run: |
+          .\scripts\Get-OpenChamberLatestTag.ps1 -Repo $env:GITHUB_REPOSITORY -TagOverride $env:TAG_OVERRIDE
+
+  build:
+    name: Build And Release
+    needs: check
+    if: needs.check.outputs.should_build == 'true' || (github.event_name == 'workflow_dispatch' && (inputs.force_build || inputs.tag_override != ''))
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Bun
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bunUrl = "https://github.com/oven-sh/bun/releases/latest/download/bun-windows-aarch64.zip"
+          $bunZip = Join-Path $env:RUNNER_TEMP "bun.zip"
+          $bunDir = Join-Path $env:RUNNER_TEMP "bun"
+          Invoke-WebRequest -UseBasicParsing -Uri $bunUrl -OutFile $bunZip
+          Expand-Archive -Path $bunZip -DestinationPath $bunDir -Force
+          $bunExe = Get-ChildItem -Path $bunDir -Recurse -Filter "bun.exe" | Select-Object -First 1
+          $bunFolder = Split-Path $bunExe.FullName
+          $oldPath = $env:PATH
+          $env:GITHUB_PATH = "$bunFolder;$env:GITHUB_PATH"
+          $env:PATH = "$bunFolder;$oldPath"
+          & $bunExe.FullName --version
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $nsisUrl = "https://sourceforge.net/projects/nsis/files/NSIS%203/3.12/nsis-3.12.zip/download"
+          $nsisZip = Join-Path $env:RUNNER_TEMP "nsis.zip"
+          $nsisDir = Join-Path $env:RUNNER_TEMP "nsis"
+          Invoke-WebRequest -UseBasicParsing -Uri $nsisUrl -OutFile $nsisZip
+          Expand-Archive -Path $nsisZip -DestinationPath $nsisDir -Force
+          $nsisExe = Get-ChildItem -Path $nsisDir -Recurse -Filter "makensis.exe" | Select-Object -First 1
+          $nsisFolder = Split-Path $nsisExe.FullName
+          $env:GITHUB_PATH = "$nsisFolder;$env:GITHUB_PATH"
+          $env:PATH = "$nsisFolder;$env:PATH"
+          & $nsisExe.FullName --VERSION
+
+      - name: Build ARM64 Installer
+        shell: pwsh
+        env:
+          UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
+        run: |
+          $buildArgs = @(
+            '-NonInteractive',
+            '-Tag', $env:UPSTREAM_TAG,
+            '-OutputDir', 'dist'
+          )
+          .\build.ps1 @buildArgs
+
+      - name: Archive Dist
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path .\dist -Filter "OpenChamber-*-win-arm64.exe" | Select-Object -First 1
+          if (-not $exe) { throw "Installer .exe not found in dist" }
+          7z a dist.7z $exe.FullName
+
+      - name: Generate Scoop Manifest
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.check.outputs.upstream_tag }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath .\dist.7z).Hash.ToLowerInvariant()
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/dist.7z"
+          New-Item -ItemType Directory -Path .\bucket -Force | Out-Null
+          $manifest = [ordered]@{
+            version = $env:VERSION
+            description = "Unofficial Windows ARM64 build of OpenChamber."
+            homepage = "https://github.com/$env:GITHUB_REPOSITORY"
+            license = "MIT"
+            depends = "7zip"
+            architecture = [ordered]@{
+              arm64 = [ordered]@{
+                url = $url
+                hash = $hash
+              }
+            }
+            installer = [ordered]@{
+              script = @(
+              '$exe = Get-ChildItem -LiteralPath $dir -Filter "OpenChamber-*-win-arm64.exe" | Select-Object -First 1'
+              'if (-not $exe) { throw "OpenChamber ARM64 installer not found." }'
+              'Write-Host "Installing OpenChamber ARM64..."'
+              'Start-Process -FilePath $exe.FullName -ArgumentList "/S" -Wait'
+              )
+            }
+            notes = "This is an unofficial ARM64 build. OpenChamber is a desktop AI coding agent."
+          }
+
+          $json = $manifest | ConvertTo-Json -Depth 8
+          $json | Set-Content -LiteralPath .\openchamber-arm64.json -Encoding UTF8
+          $json | Set-Content -LiteralPath .\bucket\openchamber-arm64.json -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openchamber-arm64-${{ needs.check.outputs.upstream_tag }}
+          path: |
+            dist.7z
+            openchamber-arm64.json
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.check.outputs.upstream_tag }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          $notes = @"
+          Unofficial Windows ARM64 build of OpenChamber $env:VERSION.
+
+          Source: openchamber/openchamber $env:RELEASE_TAG
+          Built on GitHub Actions (windows-11-arm runner).
+          "@
+
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag
+          }
+
+          gh release create $env:RELEASE_TAG dist.7z openchamber-arm64.json --title $env:RELEASE_TAG --notes $notes
+
+      - name: Commit Scoop Manifest
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.check.outputs.upstream_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/openchamber-arm64.json
+          git commit -m "Update Scoop manifest for OpenChamber $env:RELEASE_TAG"
+          git push

@@ -1,0 +1,22 @@
+{
+  "version": "0.0.0",
+  "description": "Unofficial Windows ARM64 build of OpenChamber.",
+  "homepage": "https://github.com/airtaxi/openchamber-windows-arm64",
+  "license": "MIT",
+  "depends": "7zip",
+  "architecture": {
+    "arm64": {
+      "url": "https://github.com/airtaxi/openchamber-windows-arm64/releases/download/placeholder/dist.7z",
+      "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "installer": {
+    "script": [
+      "$exe = Get-ChildItem -LiteralPath $dir -Filter \"OpenChamber-*-win-arm64.exe\" | Select-Object -First 1",
+      "if (-not $exe) { throw \"OpenChamber ARM64 installer not found.\" }",
+      "Write-Host \"Installing OpenChamber ARM64...\"",
+      "Start-Process -FilePath $exe.FullName -ArgumentList \"/S\" -Wait"
+    ]
+  },
+  "notes": "This is an unofficial ARM64 build. OpenChamber is a desktop AI coding agent."
+}
