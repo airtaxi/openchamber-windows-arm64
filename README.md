@@ -6,7 +6,7 @@
 
 OpenChamber Windows ARM64 is an unofficial automated build pipeline that produces Windows ARM64 NSIS installers for [OpenChamber](https://github.com/openchamber/openchamber), a desktop AI coding agent. It runs on GitHub Actions, polls the upstream repository for new releases every 6 hours, builds the ARM64 installer on a native Windows ARM runner, publishes a GitHub Release, and updates a Scoop bucket manifest for automatic updates.
 
-This project is intended to be maintained until OpenChamber provides official Windows ARM64 builds.
+This project is intended to be maintained until OpenChamber provides official Windows ARM64 builds. Once official ARM64 releases are available, the workflow will stop running and this repository will be archived.
 
 ## Disclaimer
 
