@@ -1,13 +1,13 @@
 {
-  "version": "1.14.0",
+  "version": "1.14.1",
   "description": "Unofficial Windows ARM64 build of OpenChamber.",
   "homepage": "https://github.com/airtaxi/openchamber-windows-arm64",
   "license": "MIT",
   "depends": "7zip",
   "architecture": {
     "arm64": {
-      "url": "https://github.com/airtaxi/openchamber-windows-arm64/releases/download/v1.14.0/dist.7z",
-      "hash": "df394db8b325cda88f985a65a464f2550a43c073e9ef2234d9e35b914906f507"
+      "url": "https://github.com/airtaxi/openchamber-windows-arm64/releases/download/v1.14.1/dist.7z",
+      "hash": "af7fabf1cd56c78ffb5f6dde117bff7ca77ad9c0c05a3e424c26cdf20877ce53"
     }
   },
   "installer": {
