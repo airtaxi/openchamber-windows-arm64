@@ -1,0 +1,309 @@
+name: Build OpenChamber ARM64 (Commit)
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Upstream OpenChamber commit SHA to build (full 40-char hash)
+        required: true
+        type: string
+      release_tag:
+        description: Release tag to publish (e.g. v1.13.9.1-commit.abc1234)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  check:
+    name: Validate Inputs
+    runs-on: ubuntu-latest
+    outputs:
+      commit_sha: ${{ steps.validate.outputs.commit_sha }}
+      release_tag: ${{ steps.validate.outputs.release_tag }}
+      version: ${{ steps.validate.outputs.version }}
+    steps:
+      - id: validate
+        name: Validate Commit And Release Tag
+        shell: pwsh
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $commitSha = $env:COMMIT_SHA.Trim()
+          if ($commitSha -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "commit_sha must be a full 40-character SHA. Got: '$commitSha'"
+          }
+          $commitSha = $commitSha.ToLowerInvariant()
+
+          $releaseTag = $env:RELEASE_TAG.Trim()
+          if ($releaseTag -notmatch '^v\d+\.\d+\.\d+(\.\d+)?(-[a-zA-Z0-9._]+)?$') {
+            throw "release_tag must look like a version (e.g. v1.13.9.1-commit.abc1234). Got: '$releaseTag'"
+          }
+
+          $version = $releaseTag -replace '^v',''
+
+          Write-Host "commit_sha:   $commitSha"
+          Write-Host "release_tag:  $releaseTag"
+          Write-Host "version:      $version"
+
+          "commit_sha=$commitSha"  >> $env:GITHUB_OUTPUT
+          "release_tag=$releaseTag" >> $env:GITHUB_OUTPUT
+          "version=$version"       >> $env:GITHUB_OUTPUT
+
+  build:
+    name: Build And Release
+    needs: check
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install nsis --version 3.12 --yes --no-progress
+          $nsisFolder = "C:\Program Files (x86)\NSIS"
+          if (-not (Test-Path (Join-Path $nsisFolder "makensis.exe"))) {
+            $nsisFolder = "C:\Program Files\NSIS"
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $nsisFolder
+          & (Join-Path $nsisFolder "makensis.exe") /VERSION
+
+      - name: Clone OpenChamber
+        shell: pwsh
+        env:
+          COMMIT_SHA: ${{ needs.check.outputs.commit_sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          git clone https://github.com/openchamber/openchamber.git openchamber
+          Push-Location openchamber
+          git checkout $env:COMMIT_SHA
+          $shortSha = git rev-parse --short HEAD
+          Write-Host "Checked out commit: $env:COMMIT_SHA ($shortSha)"
+          Pop-Location
+
+      - name: Install Dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Push-Location openchamber
+          bun install --frozen-lockfile
+          Pop-Location
+
+      - name: Apply ARM64 Patches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $clonePath = "openchamber"
+
+          # Patch 1: prepare-opencode-cli.mjs -- force x64-baseline on win32/arm64
+          $prepareCliPath = Join-Path $clonePath "packages/electron/scripts/prepare-opencode-cli.mjs"
+          $c = Get-Content $prepareCliPath -Raw
+          $old = "if (arch === 'arm64') return { name: 'opencode-windows-arm64.zip', binary: 'opencode.exe' };"
+          $new = "if (arch === 'arm64') return { name: 'opencode-windows-x64-baseline.zip', binary: 'opencode.exe' };"
+          if ($c.Contains($old)) {
+            $c = $c.Replace($old, $new)
+            Set-Content $prepareCliPath $c -NoNewline
+            Write-Host "[OK] Patched prepare-opencode-cli.mjs (arm64 -> x64-baseline)"
+          }
+
+          # Patch 2: node-pty binding.gyp -- disable Spectre mitigation
+          $nodePtyDir = Get-ChildItem -Path (Join-Path $clonePath "node_modules/.bun") -Directory -Filter "node-pty@*" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($nodePtyDir) {
+            $bg = Join-Path $nodePtyDir.FullName "node_modules/node-pty/binding.gyp"
+            if (Test-Path $bg) {
+              $c = Get-Content $bg -Raw
+              $old = "'SpectreMitigation': 'Spectre'"
+              $new = "'SpectreMitigation': 'false'"
+              if ($c.Contains($old)) {
+                $c = $c.Replace($old, $new)
+                Set-Content $bg $c -NoNewline
+                Write-Host "[OK] Patched node-pty/binding.gyp (Spectre mitigation disabled)"
+              }
+            }
+          }
+
+          # Patch 3: Disable OpenCode upgrade API -- return no-op for upgrade and upgrade-status
+          $routesPath = Join-Path $clonePath "packages/web/server/lib/opencode/routes.js"
+          if (Test-Path $routesPath) {
+            $c = Get-Content $routesPath -Raw
+            $oldUpgrade = "app.post('/api/opencode/upgrade', async (req, res) => {"
+            $newUpgrade = "app.post('/api/opencode/upgrade', async (req, res) => { return res.status(409).json({ success: false, error: 'OpenCode upgrade is disabled in this build.' });"
+            $oldStatus = "app.get('/api/opencode/upgrade-status', async (_req, res) => {"
+            $newStatus = "app.get('/api/opencode/upgrade-status', async (_req, res) => { return res.json({ available: false, currentVersion: null, latestVersion: null, source: 'bundled' });"
+            $changed = $false
+            if ($c.Contains($oldUpgrade) -and -not $c.Contains($newUpgrade)) {
+              $c = $c.Replace($oldUpgrade, $newUpgrade); $changed = $true
+            }
+            if ($c.Contains($oldStatus) -and -not $c.Contains($newStatus)) {
+              $c = $c.Replace($oldStatus, $newStatus); $changed = $true
+            }
+            if ($changed) {
+              Set-Content $routesPath $c -NoNewline
+              Write-Host "[OK] Patched routes.js (upgrade API disabled)"
+            }
+          }
+
+          # Patch 4: Default showOpenCodeUpdateNotifications to false
+          $storePath = Join-Path $clonePath "packages/ui/src/stores/useUIStore.ts"
+          if (Test-Path $storePath) {
+            $c = Get-Content $storePath -Raw
+            $old = "showOpenCodeUpdateNotifications: true,"
+            $new = "showOpenCodeUpdateNotifications: false,"
+            if ($c.Contains($old)) {
+              $c = $c.Replace($old, $new)
+              Set-Content $storePath $c -NoNewline
+              Write-Host "[OK] Patched useUIStore.ts (update notifications default off)"
+            }
+          }
+
+          # Patch 5: Hide update notification checkbox from OpenCode CLI settings
+          $settingsPath = Join-Path $clonePath "packages/ui/src/components/sections/openchamber/OpenCodeCliSettings.tsx"
+          if (Test-Path $settingsPath) {
+            $c = Get-Content $settingsPath -Raw
+            $oldCheckboxStart = '        <label data-settings-item="sessions.opencode-update-notifications"'
+            $oldCheckboxEnd = '        </label>'
+            $startIdx = $c.IndexOf($oldCheckboxStart)
+            if ($startIdx -ge 0) {
+              $endIdx = $c.IndexOf($oldCheckboxEnd, $startIdx)
+              if ($endIdx -ge 0) {
+                $endIdx += $oldCheckboxEnd.Length
+                $c = $c.Substring(0, $startIdx) + $c.Substring($endIdx)
+                Set-Content $settingsPath $c -NoNewline
+                Write-Host "[OK] Patched OpenCodeCliSettings.tsx (hidden update notification checkbox)"
+              }
+            }
+          }
+
+      - name: Build Web Assets
+        working-directory: openchamber/packages/electron
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          bun run build:web-assets
+
+      - name: Bundle Main Process
+        working-directory: openchamber/packages/electron
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          bun run bundle:main
+
+      - name: Rebuild Native Modules
+        working-directory: openchamber/packages/electron
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:ELECTRON_BUILDER_ARCH = "arm64"
+          node ./scripts/rebuild-native.mjs
+
+      - name: Build ARM64 Installer
+        working-directory: openchamber/packages/electron
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          node ./scripts/package.mjs --win --arm64 --publish=never
+
+      - name: Collect Output
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          $exe = Get-ChildItem -Path openchamber/packages/electron/dist -Filter "OpenChamber-*-win-arm64.exe" | Select-Object -First 1
+          if (-not $exe) { throw "Installer .exe not found" }
+          Copy-Item $exe.FullName -Destination (Join-Path "dist" $exe.Name) -Force
+          Write-Host "Installer: $($exe.Name)"
+          Write-Host "Size: $([math]::Round($exe.Length / 1MB, 1)) MB"
+
+      - name: Archive Dist
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path .\dist -Filter "OpenChamber-*-win-arm64.exe" | Select-Object -First 1
+          if (-not $exe) { throw "Installer .exe not found in dist" }
+          7z a dist.7z $exe.FullName
+
+      - name: Generate Scoop Manifest
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.check.outputs.release_tag }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath .\dist.7z).Hash.ToLowerInvariant()
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/dist.7z"
+          New-Item -ItemType Directory -Path .\bucket -Force | Out-Null
+          $manifest = [ordered]@{
+            version = $env:VERSION
+            description = "Unofficial Windows ARM64 build of OpenChamber."
+            homepage = "https://github.com/$env:GITHUB_REPOSITORY"
+            license = "MIT"
+            depends = "7zip"
+            architecture = [ordered]@{
+              arm64 = [ordered]@{
+                url = $url
+                hash = $hash
+              }
+            }
+            installer = [ordered]@{
+              script = @(
+              '$exe = Get-ChildItem -LiteralPath $dir -Filter "OpenChamber-*-win-arm64.exe" | Select-Object -First 1'
+              'if (-not $exe) { throw "OpenChamber ARM64 installer not found." }'
+              'Write-Host "Installing OpenChamber ARM64..."'
+              'Start-Process -FilePath $exe.FullName -ArgumentList "/S" -Wait'
+              )
+            }
+            notes = "This is an unofficial ARM64 build. OpenChamber is a desktop AI coding agent."
+          }
+
+          $json = $manifest | ConvertTo-Json -Depth 8
+          $json | Set-Content -LiteralPath .\openchamber-arm64.json -Encoding UTF8
+          $json | Set-Content -LiteralPath .\bucket\openchamber-arm64.json -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openchamber-arm64-${{ needs.check.outputs.release_tag }}
+          path: |
+            dist.7z
+            openchamber-arm64.json
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.check.outputs.release_tag }}
+          COMMIT_SHA: ${{ needs.check.outputs.commit_sha }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          $shortSha = $env:COMMIT_SHA.Substring(0,7)
+          $notes = @"
+          Unofficial Windows ARM64 build of OpenChamber $env:VERSION.
+
+          Source: openchamber/openchamber commit $env:COMMIT_SHA ($shortSha)
+          Built on GitHub Actions (windows-11-arm runner).
+          "@
+
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag
+          }
+
+          gh release create $env:RELEASE_TAG dist.7z openchamber-arm64.json --title $env:RELEASE_TAG --notes $notes
+
+      - name: Commit Scoop Manifest
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.check.outputs.release_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/openchamber-arm64.json
+          git commit -m "Update Scoop manifest for OpenChamber $env:RELEASE_TAG"
+          git push
