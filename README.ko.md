@@ -48,7 +48,10 @@ scoop update openchamber-arm64
 - **node-pty binding.gyp** — CI 툴체인에 ARM64 Spectre 라이브러리가 없으므로 Spectre mitigation을 비활성화합니다 (`Spectre` → `false`).
 - **opencode/routes.js** — `/api/opencode/upgrade` 및 `/api/opencode/upgrade-status` 엔드포인트를 비활성화하여 OpenCode가 깨진 ARM64 바이너리로 자가 업그레이드하는 것을 방지합니다.
 - **useUIStore.ts** — `showOpenCodeUpdateNotifications` 기본값을 `false`로 설정하여 업데이트 토스트가 표시되지 않도록 합니다.
-- **OpenCodeCliSettings.tsx** — 설정 페이지에서 업데이트 알림 체크박스를 숨깁니다.
+- **OpenCodeCliSettings.tsx** — 설정 페이지에서 업데이트 알림 체크박스를 숨깁니다 (기존 `<label>` 마크업과 v1.16.2에서 도입된 `SettingsCheckboxRow` 마크업 모두 지원).
+- **settings/search.ts** — 설정 검색 인덱스에서 업데이트 알림 항목을 제거합니다.
+
+패치 앵커를 찾지 못하면(예: 업스트림 리팩터링) 빌드를 즉시 중단하여, 패치가 누락된 인스톨러가 조용히 배포되지 않도록 합니다.
 
 
 

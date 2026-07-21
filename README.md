@@ -47,7 +47,10 @@ The build applies the following patches to the cloned source after `bun install`
 - **node-pty binding.gyp** — Disables Spectre mitigation (`Spectre` → `false`) since ARM64 Spectre libraries are not available in the CI toolchain.
 - **opencode/routes.js** — Disables the `/api/opencode/upgrade` and `/api/opencode/upgrade-status` endpoints to prevent OpenCode from self-upgrading to a broken ARM64 binary.
 - **useUIStore.ts** — Defaults `showOpenCodeUpdateNotifications` to `false` so update toasts do not appear.
-- **OpenCodeCliSettings.tsx** — Hides the update notification checkbox from the settings page.
+- **OpenCodeCliSettings.tsx** — Hides the update notification checkbox from the settings page (both the legacy `<label>` markup and the `SettingsCheckboxRow` markup introduced in v1.16.2).
+- **settings/search.ts** — Removes the update notification item from the settings search index.
+
+If a patch anchor is not found (e.g. after an upstream refactor), the build fails fast so a silently unpatched installer is never published.
 
 
 ## Requirements (for local builds)

@@ -107,6 +107,7 @@ jobs:
 
           # Patch 1: prepare-opencode-cli.mjs -- force x64-baseline on win32/arm64
           $prepareCliPath = Join-Path $clonePath "packages/electron/scripts/prepare-opencode-cli.mjs"
+          if (-not (Test-Path $prepareCliPath)) { throw "[FAIL] Patch 1: prepare-opencode-cli.mjs not found (upstream changed?)" }
           $c = Get-Content $prepareCliPath -Raw
           $old = "if (arch === 'arm64') return { name: 'opencode-windows-arm64.zip', binary: 'opencode.exe' };"
           $new = "if (arch === 'arm64') return { name: 'opencode-windows-x64-baseline.zip', binary: 'opencode.exe' };"
@@ -114,62 +115,67 @@ jobs:
             $c = $c.Replace($old, $new)
             Set-Content $prepareCliPath $c -NoNewline
             Write-Host "[OK] Patched prepare-opencode-cli.mjs (arm64 -> x64-baseline)"
+          } else {
+            throw "[FAIL] Patch 1 anchor not found in prepare-opencode-cli.mjs (upstream changed?)"
           }
 
           # Patch 2: node-pty binding.gyp -- disable Spectre mitigation
           $nodePtyDir = Get-ChildItem -Path (Join-Path $clonePath "node_modules/.bun") -Directory -Filter "node-pty@*" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($nodePtyDir) {
-            $bg = Join-Path $nodePtyDir.FullName "node_modules/node-pty/binding.gyp"
-            if (Test-Path $bg) {
-              $c = Get-Content $bg -Raw
-              $old = "'SpectreMitigation': 'Spectre'"
-              $new = "'SpectreMitigation': 'false'"
-              if ($c.Contains($old)) {
-                $c = $c.Replace($old, $new)
-                Set-Content $bg $c -NoNewline
-                Write-Host "[OK] Patched node-pty/binding.gyp (Spectre mitigation disabled)"
-              }
-            }
+          if (-not $nodePtyDir) { throw "[FAIL] Patch 2: node-pty directory not found under node_modules/.bun (upstream changed?)" }
+          $bg = Join-Path $nodePtyDir.FullName "node_modules/node-pty/binding.gyp"
+          if (-not (Test-Path $bg)) { throw "[FAIL] Patch 2: binding.gyp not found at '$bg' (upstream changed?)" }
+          $c = Get-Content $bg -Raw
+          $old = "'SpectreMitigation': 'Spectre'"
+          $new = "'SpectreMitigation': 'false'"
+          if ($c.Contains($old)) {
+            $c = $c.Replace($old, $new)
+            Set-Content $bg $c -NoNewline
+            Write-Host "[OK] Patched node-pty/binding.gyp (Spectre mitigation disabled)"
+          } else {
+            throw "[FAIL] Patch 2 anchor not found in node-pty/binding.gyp (upstream changed?)"
           }
 
           # Patch 3: Disable OpenCode upgrade API -- return no-op for upgrade and upgrade-status
           $routesPath = Join-Path $clonePath "packages/web/server/lib/opencode/routes.js"
-          if (Test-Path $routesPath) {
-            $c = Get-Content $routesPath -Raw
-            $oldUpgrade = "app.post('/api/opencode/upgrade', async (req, res) => {"
-            $newUpgrade = "app.post('/api/opencode/upgrade', async (req, res) => { return res.status(409).json({ success: false, error: 'OpenCode upgrade is disabled in this build.' });"
-            $oldStatus = "app.get('/api/opencode/upgrade-status', async (_req, res) => {"
-            $newStatus = "app.get('/api/opencode/upgrade-status', async (_req, res) => { return res.json({ available: false, currentVersion: null, latestVersion: null, source: 'bundled' });"
-            $changed = $false
-            if ($c.Contains($oldUpgrade) -and -not $c.Contains($newUpgrade)) {
-              $c = $c.Replace($oldUpgrade, $newUpgrade); $changed = $true
-            }
-            if ($c.Contains($oldStatus) -and -not $c.Contains($newStatus)) {
-              $c = $c.Replace($oldStatus, $newStatus); $changed = $true
-            }
-            if ($changed) {
-              Set-Content $routesPath $c -NoNewline
-              Write-Host "[OK] Patched routes.js (upgrade API disabled)"
-            }
-          }
+          if (-not (Test-Path $routesPath)) { throw "[FAIL] Patch 3: routes.js not found (upstream changed?)" }
+          $c = Get-Content $routesPath -Raw
+          $oldUpgrade = "app.post('/api/opencode/upgrade', async (req, res) => {"
+          $newUpgrade = "app.post('/api/opencode/upgrade', async (req, res) => { return res.status(409).json({ success: false, error: 'OpenCode upgrade is disabled in this build.' });"
+          $oldStatus = "app.get('/api/opencode/upgrade-status', async (_req, res) => {"
+          $newStatus = "app.get('/api/opencode/upgrade-status', async (_req, res) => { return res.json({ available: false, currentVersion: null, latestVersion: null, source: 'bundled' });"
+          if (-not $c.Contains($oldUpgrade)) { throw "[FAIL] Patch 3 anchor not found: /api/opencode/upgrade (upstream changed?)" }
+          if (-not $c.Contains($oldStatus)) { throw "[FAIL] Patch 3 anchor not found: /api/opencode/upgrade-status (upstream changed?)" }
+          $c = $c.Replace($oldUpgrade, $newUpgrade).Replace($oldStatus, $newStatus)
+          Set-Content $routesPath $c -NoNewline
+          Write-Host "[OK] Patched routes.js (upgrade API disabled)"
 
           # Patch 4: Default showOpenCodeUpdateNotifications to false
           $storePath = Join-Path $clonePath "packages/ui/src/stores/useUIStore.ts"
-          if (Test-Path $storePath) {
-            $c = Get-Content $storePath -Raw
-            $old = "showOpenCodeUpdateNotifications: true,"
-            $new = "showOpenCodeUpdateNotifications: false,"
-            if ($c.Contains($old)) {
-              $c = $c.Replace($old, $new)
-              Set-Content $storePath $c -NoNewline
-              Write-Host "[OK] Patched useUIStore.ts (update notifications default off)"
-            }
+          if (-not (Test-Path $storePath)) { throw "[FAIL] Patch 4: useUIStore.ts not found (upstream changed?)" }
+          $c = Get-Content $storePath -Raw
+          $old = "showOpenCodeUpdateNotifications: true,"
+          $new = "showOpenCodeUpdateNotifications: false,"
+          if ($c.Contains($old)) {
+            $c = $c.Replace($old, $new)
+            Set-Content $storePath $c -NoNewline
+            Write-Host "[OK] Patched useUIStore.ts (update notifications default off)"
+          } else {
+            throw "[FAIL] Patch 4 anchor not found in useUIStore.ts (upstream changed?)"
           }
 
           # Patch 5: Hide update notification checkbox from OpenCode CLI settings
           $settingsPath = Join-Path $clonePath "packages/ui/src/components/sections/openchamber/OpenCodeCliSettings.tsx"
-          if (Test-Path $settingsPath) {
-            $c = Get-Content $settingsPath -Raw
+          if (-not (Test-Path $settingsPath)) { throw "[FAIL] Patch 5: OpenCodeCliSettings.tsx not found (upstream changed?)" }
+          $c = Get-Content $settingsPath -Raw
+          $patched = $false
+
+          # New markup (v1.16.2+): self-closing <SettingsCheckboxRow settingsItem="..." ... />
+          $rowPattern = '(?ms)^[ \t]*<SettingsCheckboxRow(?:(?!/>).)*settingsItem="sessions\.opencode-update-notifications"(?:(?!/>).)*/>\r?\n?'
+          if ($c -match $rowPattern) {
+            $c = [regex]::Replace($c, $rowPattern, '')
+            $patched = $true
+          } else {
+            # Old markup (<= v1.16.1): <label data-settings-item="sessions.opencode-update-notifications"> ... </label>
             $oldCheckboxStart = '        <label data-settings-item="sessions.opencode-update-notifications"'
             $oldCheckboxEnd = '        </label>'
             $startIdx = $c.IndexOf($oldCheckboxStart)
@@ -178,10 +184,29 @@ jobs:
               if ($endIdx -ge 0) {
                 $endIdx += $oldCheckboxEnd.Length
                 $c = $c.Substring(0, $startIdx) + $c.Substring($endIdx)
-                Set-Content $settingsPath $c -NoNewline
-                Write-Host "[OK] Patched OpenCodeCliSettings.tsx (hidden update notification checkbox)"
+                $patched = $true
               }
             }
+          }
+
+          if ($patched) {
+            Set-Content $settingsPath $c -NoNewline
+            Write-Host "[OK] Patched OpenCodeCliSettings.tsx (hidden update notification checkbox)"
+          } else {
+            throw "[FAIL] Patch 5 anchor not found in OpenCodeCliSettings.tsx (upstream changed?)"
+          }
+
+          # Patch 6: Remove update notification item from settings search index
+          $searchPath = Join-Path $clonePath "packages/ui/src/lib/settings/search.ts"
+          if (-not (Test-Path $searchPath)) { throw "[FAIL] Patch 6: search.ts not found (upstream changed?)" }
+          $c = Get-Content $searchPath -Raw
+          $entryPattern = '(?m)^[ \t]*\{[^{}]*?id:\s*''sessions\.opencode-update-notifications''[^{}]*?\},\r?\n?'
+          if ($c -match $entryPattern) {
+            $c = [regex]::Replace($c, $entryPattern, '')
+            Set-Content $searchPath $c -NoNewline
+            Write-Host "[OK] Patched search.ts (removed update notification search entry)"
+          } else {
+            throw "[FAIL] Patch 6 anchor not found in search.ts (upstream changed?)"
           }
 
       - name: Build Web Assets
